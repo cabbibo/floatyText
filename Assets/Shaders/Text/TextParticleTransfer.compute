@@ -1,0 +1,99 @@
+﻿
+#pragma kernel Transfer
+
+struct Output{
+    float3 pos;
+    float3 vel;
+    float3 nor;
+    float3 tangent;
+    float2 uv;
+    float2 debug;
+};
+
+
+struct Vert{
+    float3 pos;
+    float3 nor;
+    float2 position;
+    float2 dimensions;
+    float2 offset;
+};
+
+
+RWStructuredBuffer<Output> _VertBuffer;
+RWStructuredBuffer<Vert> _SkeletonBuffer;
+
+int _VertBuffer_COUNT;
+int _SkeletonBuffer_COUNT;
+#include "../Chunks/safeID.cginc"
+
+
+float3 _CameraUp;
+float3 _CameraLeft;
+float _Radius;
+
+
+#define NR_THREADS 128
+[numthreads(NR_THREADS,1,1)]
+void Transfer (uint threadID : SV_GroupIndex, uint3 u3GroupID : SV_GroupID) {
+
+    int pID = threadID + u3GroupID.x * NR_THREADS;
+
+    int particleID = pID / 4;
+
+
+    Vert p = _SkeletonBuffer[safeID(particleID,_SkeletonBuffer_COUNT)];
+
+    int idInParticle = pID % 4;
+    int row = idInParticle / 2;
+    int col = pID % 2;
+
+    float3 u = -normalize(cross(p.nor,float3(0,1,0)));
+    float3 l = normalize(cross(p.nor,u));
+
+    float3 l1 =l* (float(col)-.5);
+    float3 u1 =u* (float(row)-.5);
+
+    float glyphWidth = 80.5 / 1024.;
+    float glyphHeight = 145. / 1024.;
+    float glyphBelow =   29. / 1024.;
+    float totalSize = glyphHeight;
+    
+    float widthOffset = (glyphHeight - glyphWidth)/2.;
+    float wOPercent = widthOffset / totalSize;
+
+    float belowP = glyphBelow / totalSize;
+
+    float wO = (glyphHeight - glyphWidth)/2.;
+
+
+    float wh = glyphWidth / glyphHeight;
+
+
+
+    float3 fPos = p.pos + (l1*p.dimensions.y) + (u1*p.dimensions.x);
+    fPos -= .5*l*p.dimensions.y;
+    fPos += 1*l*p.offset.y;
+    //fPos -= l*p.dimensions.y;
+    //fPos += u*p.offset.x; //-.5*p.offset.y) + u*(p.dimensions.x+p.offset.x)) *  1;
+
+    float2 fUV = float2( float(row) , float(col) );
+
+
+
+    float x = fUV.x * p.dimensions.x  + p.position.x;
+    float y = fUV.y * p.dimensions.y  - p.position.y - p.dimensions.y;
+
+    fUV = float2(x,y);
+
+    int sID = safeID(pID,_VertBuffer_COUNT);
+
+    Output v = _VertBuffer[sID];
+
+    v.pos = fPos;
+    v.uv = fUV;
+    v.nor = p.nor;
+
+    _VertBuffer[sID] = v;
+
+}
