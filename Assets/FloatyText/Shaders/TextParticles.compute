@@ -1,0 +1,463 @@
+﻿  
+#pragma kernel SetGlyph
+#pragma kernel SetAnchor
+#pragma kernel SetPageAtEmitPos
+#pragma kernel SimulationTest 
+#pragma kernel SimulationDebug 
+#pragma kernel Transfer 
+
+
+
+// Our Structs
+
+// This is for transfering the vert 
+// to the final mesh
+struct TransferVert{
+    float3 pos;
+    float3 vel;
+    float3 nor;
+    float3 lockPosition;
+    float2 uv;
+    float2 offset;
+    float  whichTextureType;
+    float  extraScale;
+    float  hueExtra;
+    float  special;
+};
+
+
+// This is the data for our actual vert
+struct Vert{
+    float3 pos;
+    float3 vel;
+    float3 nor;
+    float3 lockPosition;
+    float2 uv;
+    float2 offset;
+    float4 debug;
+};
+
+
+// This is the anchor information we can pass on
+struct Anchor{
+    float3 pos;
+    float3 nor;
+    float2 position;
+    float2 dimensions;
+    float2 offset;
+    float2 location;
+    float2 scaledDimensions;
+    float  whichTextureType;
+    float  extraScale;
+    float  hueExtra;
+    float  special;
+};
+
+
+
+// Declaring our buffers
+RWStructuredBuffer<Vert> _VertBuffer;
+RWStructuredBuffer<TransferVert> _TransferBuffer;
+RWStructuredBuffer<Anchor> _AnchorBuffer;
+
+
+
+#include "../Chunks/safeID.cginc"
+#include "../Chunks/nanCheckVert.cginc"
+#include "../Chunks/snoise.cginc"
+#include "../Chunks/curlNoise.cginc"
+#include "../Chunks/hash.cginc"
+
+
+float3 _CameraUp;
+float3 _CameraPosition;
+float3 _CameraLeft;
+float3 _CameraRight;
+
+
+// TODO: do we need these?
+float _Radius;
+float _Scale;
+float _Time;
+
+float3 _RayOrigin;
+float3 _RayDirection;
+
+float _FontWidth;
+float _FontHeight;
+float _FontSize;
+
+
+
+#include "../Chunks/GetRayForce.cginc"
+
+
+float3 _Up;
+
+
+// Letting us know how 'alive' the page is
+float _PageAlive;
+
+
+// the min and max IDS
+int _BaseID;
+int _TipID;
+
+
+int _FullCount;
+int _AnchorCount;
+
+
+// Getting a looping id so we can
+// reuse particles!
+int GetID( int id ){
+  return (id + _BaseID) % _FullCount;
+}
+
+
+
+// Checking to see if we are with the current
+// base and tip
+bool inCurrent( int id ){
+
+  if( GetID( id ) < _BaseID || GetID( id ) > _TipID ){
+    return false;
+  }else{
+    return true;
+  }
+}
+
+
+bool isInside( int id){
+    // Getting our ID and if we are currently locked or not
+    int dif = _TipID - _BaseID;
+
+    int inBase = _BaseID % _FullCount;
+
+    int newID = id;
+
+    if( inBase + dif > _FullCount ){
+      if( newID < inBase ){ newID += _FullCount; }
+    }
+
+    return (newID >= inBase && newID < inBase + dif);
+
+}
+
+
+float3 getProj( float3 pos , float3 sp , float3 ep ){
+  float3 dif = sp-ep;
+  float dot1 = dot( pos-sp , normalize(dif));
+
+  float3 proj = normalize(dif) * dot1;
+  float dotProj = dot( proj, ep-sp);
+  
+  float3 lineToPoint = pos-sp-proj;
+
+  return lineToPoint;
+}
+
+
+float3 CurlForce( float3 v , float3 rO , float3 rD ){
+
+
+  float3 toLine = getProj( v , rO , rO + rD );
+
+  float3 curl = cross( toLine , rD );
+
+  return curl; 
+
+} 
+
+
+float _Active;
+
+#define NR_THREADS 128
+[numthreads(NR_THREADS,1,1)]
+void SetGlyph(uint threadID : SV_GroupIndex, uint3 u3GroupID : SV_GroupID) {
+
+
+    // dispatching for every point in our transfer buffer
+    int pID = threadID + u3GroupID.x * NR_THREADS;
+
+
+    // getting which particle our transfer is in
+    int particleID = pID/4;
+
+    // looping around using base and tip id
+    int realPID = GetID( particleID );
+
+    //Getting our final transfer buffer ID
+    int sID = safeID(realPID*4 + pID%4,_FullCount * 4);
+    
+    TransferVert v = _TransferBuffer[ sID ];
+
+    // Setting the 'time' which we have locked
+    if( isInside(realPID) ){
+
+      int safe = safeID(realPID,_FullCount); 
+
+      Vert v = _VertBuffer[safe];
+
+      v.debug.x = _Time;
+      v.debug.y = 1;
+
+      _VertBuffer[safe] = v;
+
+    }
+
+    if( particleID < _AnchorCount ){
+
+      Anchor p = _AnchorBuffer[safeID(particleID,_AnchorCount)];
+
+    
+      // getting the row and particle 
+      // in our transfer buffer!
+      int idInParticle = pID % 4;
+      int row = idInParticle / 2;
+      int col = pID % 2;
+
+
+      
+      // Creating the 'offset' for the transfer buffer
+      float2 fOffset = float2(0,0);
+
+      fOffset.x = -p.offset.x +  float(row) * p.dimensions.x;//(float(row) )* p.scaledDimensions.x/_FontSize //p.offset.x/_FontSize * .5;
+      fOffset.y = -p.offset.y +  float(col) * p.dimensions.y;//(float(row) )* p.dimensions.x/_FontSize //p.offset.x/_FontSize * .5;
+      
+      fOffset -= float2( _FontSize/2 , -_FontSize/2 );//p.offset.x;
+      fOffset /= _FontSize;
+
+
+      float2 fUV = float2( float(row) , 1-float(col) );
+
+      float x = (fUV.x * p.dimensions.x / _FontWidth)  + (p.position.x/ _FontWidth) ;
+      float y = (fUV.y * p.dimensions.y / _FontHeight) + (1-(p.position.y/ _FontHeight))-p.dimensions.y/ _FontHeight;// - p.dimensions.y;
+
+
+      // Setting our uv for looking up later
+      fUV = float2(x,y);
+
+      v.uv = fUV;
+      v.offset = fOffset * float2(1,-1);// * _Radius * _Scale;///_FontWidth;
+      v.nor = float3(0,0,1);//p.nor;
+      
+      
+      // TODO can use these better!
+      v.extraScale = p.extraScale;
+      v.whichTextureType = p.whichTextureType;
+      v.hueExtra = p.hueExtra;
+      v.special = p.special;
+    
+    }else{
+    
+      // Faking if outside!
+      v.uv = float2(0,0);
+      v.offset = float2(0,0);
+      v.nor = float3(0,0,1);
+    
+    }
+
+    _TransferBuffer[sID] = v;
+
+}
+
+
+
+
+float3 _FrameTopLeft;
+float3 _FrameRight;
+float3 _FrameUp;
+float _FrameWidth;
+float _FrameHeight;
+
+#define NR_THREADS 128
+[numthreads(NR_THREADS,1,1)]
+void SetAnchor(uint threadID : SV_GroupIndex, uint3 u3GroupID : SV_GroupID) {
+
+    int pID = threadID + u3GroupID.x * NR_THREADS;
+
+    // The vert we are setting needs to be cycled
+    // but the anchor should just be the pID
+    int sID =safeID(GetID(pID),_FullCount);
+
+    Vert v = _VertBuffer[sID];
+
+    if(pID <= _AnchorCount ){
+
+      //scaledCharacterSize * (float)Arial.info[c][6] / (float)Arial.size;
+    
+      Anchor p = _AnchorBuffer[safeID(pID,_AnchorCount)];
+      v.lockPosition = _FrameTopLeft + ( p.location.x ) * _FrameRight - p.location.y * _FrameUp;//p.pos;
+
+    }else{
+     // v.lockPosition = _UrsulaPos;
+    }
+
+    _VertBuffer[sID] = v;
+
+}
+
+
+float3 randDir( float l ){
+
+  return float3((2*hash(l * 123.)-1),
+                (2*hash(l * 226.)-1),
+                (2*hash(l * 317.)-1));
+}
+
+
+
+
+float3 _EmitPos;
+
+#define NR_THREADS 128
+[numthreads(NR_THREADS,1,1)]
+void SetPageAtEmitPos(uint threadID : SV_GroupIndex, uint3 u3GroupID : SV_GroupID) {
+
+    int pID = threadID + u3GroupID.x * NR_THREADS;
+    int sID =safeID(GetID(pID),_FullCount);
+    Vert v = _VertBuffer[sID];
+    
+
+    // Need to make sure that its not bigger than anchor count
+    // so doesn't accidently set another letter
+    if(pID <= _AnchorCount ){ v.pos = _EmitPos; }
+
+    _VertBuffer[sID] = v;
+
+}
+
+
+float sdCapsule( float3 p, float3 a, float3 b, float r )
+{
+    float3 pa = p - a, ba = b - a;
+    float h = clamp( dot(pa,ba)/dot(ba,ba), 0.0, 1.0 );
+    return length( pa - ba*h ) - r;
+}
+
+
+
+
+
+#define NR_THREADS 128
+[numthreads(NR_THREADS,1,1)]
+void SimulationTest(uint threadID : SV_GroupIndex, uint3 u3GroupID : SV_GroupID) {
+
+    int pID = threadID + u3GroupID.x * NR_THREADS;
+    int sID =safeID(pID,_FullCount);
+    Vert v = _VertBuffer[sID];
+    TransferVert tv = _TransferBuffer[safeID(pID*4,_FullCount*4)];
+
+    float3 force = 0;
+
+    // Getting our ID and if we are currently locked or not
+    int dif = _TipID - _BaseID;
+
+
+    bool inside = isInside(pID);
+
+    if( inside ){
+
+      float t = _Time - v.debug.x;
+
+      force += -min((v.pos - v.lockPosition),1000) * .01;
+
+      //force += curlNoise( v.pos * .4 ) * .002 * min( pow((v.pos - v.lockPosition),4),3)/(t*t*.4+1);
+      //force += GetRayForce( v.pos , -.004 , 5 * length( tv.offset) );
+
+    }else{
+     
+      force += curlNoise( v.pos * .3 ) * .002;
+      force += float3(0,1,0) * .01;
+      //v.debug.y -= .005;
+
+    }
+
+  if( length( force ) > 1 ){ force = normalize(force) * 1; }
+    //}
+    //}else{
+    //  force += float3(0,1,0) * .01;
+    //}
+    v.vel  += force * (hash((float)pID) * .6+ .4);
+
+
+  if( length( v.vel ) > 1 ){ v.vel = normalize(v.vel) * 1; }
+    v.pos += v.vel;
+    v.vel *= .8;
+
+    nanCheck(v);
+    //v.pos = v.lockPosition;
+    _VertBuffer[sID] = v;
+}
+
+
+
+#define NR_THREADS 128
+[numthreads(NR_THREADS,1,1)]
+void SimulationDebug(uint threadID : SV_GroupIndex, uint3 u3GroupID : SV_GroupID) {
+
+    int pID = threadID + u3GroupID.x * NR_THREADS;
+    int sID =safeID(GetID(pID),_FullCount);
+    Vert v = _VertBuffer[sID];
+
+
+   
+    v.pos = v.lockPosition;
+
+
+    _VertBuffer[sID] = v;
+
+}
+
+
+#define NR_THREADS 128
+[numthreads(NR_THREADS,1,1)]
+void Transfer(uint threadID : SV_GroupIndex, uint3 u3GroupID : SV_GroupID) {
+
+    int pID = threadID + u3GroupID.x * NR_THREADS;
+    int sID =safeID(GetID(pID/4)*4 + pID%4,_FullCount*4);
+
+    TransferVert v = _TransferBuffer[sID];
+
+    int particleID = GetID(pID/4);
+
+    Vert p = _VertBuffer[safeID(particleID,_FullCount)];
+
+
+
+    float radiusMultiplier = 1;
+
+    bool inside = isInside( particleID );
+
+    if( !inside){
+      radiusMultiplier = max(p.debug.y,0); //1/((_Time - p.debug.x) + 1);
+    }
+
+    //radiusMultiplier = 1;
+
+
+    int idInParticle = pID % 4;
+    int row = idInParticle / 2;
+    int col = pID % 2;
+
+    float3 u = _CameraUp ;
+    float3 l = _CameraRight;//normalize(cross(float3(0,0,1),u));
+
+    //l = l* (float(col)-.5);
+    //u = u* (float(row)-.5);
+
+    //u = float3(0,1,0);
+    //l = float3(1,0,0);
+
+    float3 fPos = p.pos + ((u*v.offset.y) + (l*v.offset.x)) * radiusMultiplier * 1*_Radius*_Scale;
+    //float3 fPos = p.pos + ((l) + (u))*_Radius*_Scale;
+
+    v.pos = fPos;
+    v.vel = p.vel;
+    //v.uv = v.uv;
+    //v.nor = p.nor;
+
+    _TransferBuffer[sID] = v;
+
+}
