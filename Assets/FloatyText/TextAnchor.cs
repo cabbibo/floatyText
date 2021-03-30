@@ -214,11 +214,9 @@ public string text;
 
 
     public FontData( string text ){
-      print( text );
 
       
       string[] lines = text.Split('\n');
-      print( lines.Length );
 
       this.characters = new Dictionary<char,Char>();
 

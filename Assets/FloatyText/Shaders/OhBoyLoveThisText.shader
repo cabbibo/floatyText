@@ -105,11 +105,11 @@
        
     Pass {
      //Tags {"Queue"="Transparent+10" "RenderType"="Transparent" }
-      Tags{ "LightMode" = "ForwardBase" }
-      Cull Off
+      Tags{ "Queue"="Geometry" "LightMode" = "ForwardBase"  }
+      //Cull Off
       ZWrite On
-        Blend One One
-        ZTest Always
+      Blend One One
+      ZTest Always
 
 
 
@@ -120,7 +120,7 @@
      //#pragma multi_compile_fwdbase nolightmap nodirlightmap nodynlightmap novertexlight
       CGPROGRAM
 
-      #pragma multi_compile_fwdbase nolightmap nodirlightmap nodynlightmap novertexlight
+      #pragma multi_compile_fwdbase
       
       #include "UnityCG.cginc"
       #include "AutoLight.cginc"    
@@ -196,7 +196,7 @@
         return float4(  c * 1.4 , saturate(2*d));
 
         float3 col = c;//float3(1,0,0);
-        return float4( col , d);
+        return float4( col , 1);
         //return 1;
 
       }
