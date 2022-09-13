@@ -1,4 +1,4 @@
-﻿Shader "Text/OhBoyLoveThisTexts" {
+Shader "Text/OhBoyLoveThisTexts" {
   Properties {
 
     _Color ("Color", Color) = (1,1,1,1)
@@ -11,10 +11,14 @@
     _TextMap ("Textmap", 2D) = "white" {}
     _CutoffMap ("CutoffMap", 2D) = "white" {}
 
+       _NormalMap ("Normal", 2D) = "white" {}
     _AlphaCutoff ("_AlphaCutoff", float ) = .3
 
     
     _ColorMap ("ColorMap", 2D) = "white" {}
+
+    
+       _CubeMap( "Cube Map" , Cube )  = "defaulttexture" {}
 
     
   }
@@ -29,7 +33,7 @@
       #pragma fragment frag
 
       
-        uniform sampler2D _TextMap;
+      uniform sampler2D _TextMap;
     
       uniform sampler2D _CutoffMap; 
 
@@ -53,10 +57,9 @@
         float scaleOffset;
         float hueOffset;
         float special; 
-
       };
 
-    StructuredBuffer<Vert> _VertBuffer;
+      StructuredBuffer<Vert> _VertBuffer;
       StructuredBuffer<int> _TriBuffer;
 
 
@@ -97,6 +100,12 @@
       }
     ENDCG
 
+
+
+
+
+
+
   SubShader {
     // COLOR PASS
 
@@ -105,11 +114,11 @@
        
     Pass {
      //Tags {"Queue"="Transparent+10" "RenderType"="Transparent" }
-      Tags{ "LightMode" = "ForwardBase" }
+      Tags{ "Queue"="Geometry" "LightMode" = "ForwardBase"  }
       Cull Off
       ZWrite On
-        Blend One One
-        ZTest Always
+      //Blend One One
+      ZTest Always
 
 
 
@@ -120,7 +129,7 @@
      //#pragma multi_compile_fwdbase nolightmap nodirlightmap nodynlightmap novertexlight
       CGPROGRAM
 
-      #pragma multi_compile_fwdbase nolightmap nodirlightmap nodynlightmap novertexlight
+      #pragma multi_compile_fwdbase
       
       #include "UnityCG.cginc"
       #include "AutoLight.cginc"    
@@ -145,6 +154,10 @@
         float  hueOffset : TEXCOORD12;
         float  special  : TEXCOORD13;
         float  vel  : TEXCOORD14;
+        
+        float3  t1  : TEXCOORD15;
+        float3  t2  : TEXCOORD16;
+        float3  t3  : TEXCOORD17;
         UNITY_SHADOW_COORDS(2)
       };
 
@@ -172,32 +185,64 @@
         o.vel = length( v.vel);
 
 
+    float3 nor = v.nor;
+    float3 tan = UNITY_MATRIX_IT_MV[0].xyz;
+    float3 bi = cross(nor, tan);
+    
+    // output the tangent space matrix
+    o.t1 =  float3(tan.x, bi.x, nor.x);
+    o.t2 =  float3(tan.y, bi.y, nor.y);
+    o.t3 =  float3(tan.z, bi.z, nor.z);
+
+
         UNITY_TRANSFER_SHADOW(o,o.worldPos);
         return o;
       }
 
     
       uniform sampler2D _ColorMap;
+      uniform sampler2D _NormalMap;
+float3 MapNormal(  varyings v , float val ){
+   float3 tnormal = UnpackNormal(tex2D(_NormalMap, v.uv * 2));
+   // transform normal from tangent to world space
+  float3 n;
+  n.x = dot(v.t1, tnormal);
+  n.y = dot(v.t2, tnormal);
+  n.z = dot(v.t3, tnormal);
+  return  normalize(lerp(v.nor , -n, val));
+}
 
 
 
+  uniform samplerCUBE _CubeMap;
       float4 frag(varyings v) : COLOR {
 
-      
+                
         float d = GetCutoff( v.uv , v.textureVal );
         if( d < _AlphaCutoff ){ discard; }
 
 
-        float3 c = tex2D(_ColorMap,float2(v.vel * 10.1 + .7  + _BaseHue + v.hueOffset + d * .1,0) ).xyz;
+        float3 c = tex2D(_ColorMap,float2(v.vel * 10.1 + .7  + _BaseHue + v.hueOffset + d * 1.1,0) ).xyz;
         
+        float3 lightPos = _WorldSpaceLightPos0;
 
-       
+        //dot( lightPos , v.nor );
+
+    float3 nor = MapNormal(v , 10.3 );
+
+      float3 refl = normalize(reflect( v.eye,nor ));
+
+
+      
+      c *= 2*texCUBE( _CubeMap , refl);
+      
+    //  c =  dot( normalize(lightPos.xyz) , v.nor );//v.nor;// * .5 + .5;
+
+        //return float4(c,1);
 
         return float4(  c * 1.4 , saturate(2*d));
 
-        float3 col = c;//float3(1,0,0);
-        return float4( col , d);
-        //return 1;
+    
 
       }
 

@@ -71,26 +71,43 @@ public string text;
   public List<glyph> glyphs;
 
   public float scale;
+
+
+  [HideInInspector]
   public float scaledCharacterSize;
+  
+  [HideInInspector]
   public float scaledLineHeight;
+  
+  [HideInInspector]
   public float scaledAdvance;
 
 
+  [HideInInspector]
   public float currentTextureVal;
+  
+  [HideInInspector]
   public float currentScaleOffset;
+  
+  [HideInInspector]
   public float currentHueOffset;
+  
+  [HideInInspector]
   public float currentSpecial;
 
  //public int row;
  //public int column;
+ 
+  [HideInInspector]
   public float locationX;
+  
+  [HideInInspector]
   public float locationY;
 
 
 
 
   void OnEnable(){
-
     LoadFont();
     SetFrame();
     SetStructSize();
@@ -100,9 +117,7 @@ public string text;
   }
 
   void OnDisable(){
-
     ReleaseBuffer();
-
   }
 
   public void ReleaseBuffer(){
@@ -200,6 +215,14 @@ public string text;
   }
 
 
+
+  /*
+
+    This is for parsing the data you get from
+    
+
+  */
+
   public class FontData{
     public string name;
     public int size;
@@ -214,11 +237,9 @@ public string text;
 
 
     public FontData( string text ){
-      print( text );
 
       
       string[] lines = text.Split('\n');
-      print( lines.Length );
 
       this.characters = new Dictionary<char,Char>();
 
@@ -238,7 +259,6 @@ public string text;
           value = value.Replace("\"", "");
           value = value.Replace(" ", "");
           value = value.Replace(",", "");
-          //value = value.Replace("{", "");
         
           if(property == "name"){
             this.name = value;
@@ -436,8 +456,12 @@ public string text;
   }
   
 
+  public Vector3[] finalPositions; 
+
   void Embody(){
 
+
+    finalPositions = new Vector3[count];
 
     float[] values = new float[count*structSize];
     int index = 0;
@@ -453,6 +477,8 @@ public string text;
 
       p = topLeft + dir * glyphs[i].left + down * glyphs[i].top;
 
+
+    finalPositions[i] = p;
       // position
       values[ index ++ ] = p.x;
       values[ index ++ ] = p.y;
@@ -562,10 +588,16 @@ public string text;
 
   public Vector3 bottomLeft;
   public Vector3 bottomRight;
-
-
   public Vector3 topLeft;
   public Vector3 topRight;
+
+
+  public Vector3 fullBottomLeft;
+  public Vector3 fullBottomRight;
+  public Vector3 fullTopLeft;
+  public Vector3 fullTopRight;
+
+
   public Vector3 center;
 
   public float width;
@@ -591,6 +623,14 @@ public string text;
     bottomRight = Camera.main.ViewportToWorldPoint(new Vector3(1- borderRight,_ratio *borderBottom ,distance));
     topLeft = Camera.main.ViewportToWorldPoint(new Vector3(borderLeft,1-_ratio * borderTop,distance));
     topRight = Camera.main.ViewportToWorldPoint(new Vector3(1-borderRight,1-_ratio * borderTop,distance));
+
+
+
+    
+    fullBottomLeft = Camera.main.ViewportToWorldPoint(new Vector3( 0 ,0,distance));  
+   fullBottomRight = Camera.main.ViewportToWorldPoint(new Vector3(1,0,distance));
+    fullTopLeft = Camera.main.ViewportToWorldPoint(new Vector3(0,1,distance));
+    fullTopRight = Camera.main.ViewportToWorldPoint(new Vector3(1,1,distance));
 
 
     center = Camera.main.ViewportToWorldPoint(new Vector3( .5f , .5f , distance )); 
@@ -620,6 +660,36 @@ public string text;
     }
   }
 
+ void OnDrawGizmosSelected()
+    {
+        // Draw a yellow sphere at the transform's position
+    
+        Gizmos.color = Color.red;
+         Gizmos.DrawLine(transform.position, fullBottomLeft);
+        Gizmos.DrawLine(transform.position , fullBottomRight);
+        Gizmos.DrawLine(transform.position , fullTopLeft);
+        Gizmos.DrawLine(transform.position , fullTopRight);
+
+        
+        Gizmos.DrawLine(fullBottomLeft, fullTopLeft);
+        Gizmos.DrawLine(fullTopLeft, fullTopRight);
+        Gizmos.DrawLine(fullTopRight, fullBottomRight);
+        Gizmos.DrawLine(fullBottomRight, fullBottomLeft);
+    Gizmos.color = Color.yellow;
+   
+
+        
+        Gizmos.DrawLine(bottomLeft, topLeft);
+        Gizmos.DrawLine(topLeft, topRight);
+        Gizmos.DrawLine(topRight, bottomRight);
+        Gizmos.DrawLine(bottomRight, bottomLeft);
+
+
+   Gizmos.color = Color.white;
+        for( int i=0; i < finalPositions.Length; i++ ){
+          Gizmos.DrawWireCube( finalPositions[i], Vector3.one * .01f);
+        }
+    }
 }
 
 

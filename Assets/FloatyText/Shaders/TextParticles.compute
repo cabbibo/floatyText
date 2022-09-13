@@ -108,6 +108,43 @@ int _FullCount;
 int _AnchorCount;
 
 
+
+float _ForceMultiplier;
+
+float3 _Emitter;
+float _EmitterSpread;
+
+float3 _Gravity;
+float _GravityPower;
+
+float3 _Repeller;
+float _RepellerPower;
+float _RepellerRadius;
+
+float _NoiseSize;
+float _NoisePower;
+
+float3 _NoiseSpeed;
+  
+
+float _LockPower;
+float _MassRandomness;
+float _Mass;
+
+float _DieRate;
+float _LiveRate;
+
+float _LockedNoisePower;
+float _LockedNoiseSize;
+float3 _LockedNoiseSpeed;
+
+float _LockedDampening;
+float _Dampening;
+
+float _SpawnRate;
+
+
+
 // Getting a looping id so we can
 // reuse particles!
 int GetID( int id ){
@@ -144,6 +181,24 @@ bool isInside( int id){
 
 }
 
+float insideAmount( int id ){
+
+    // Getting our ID and if we are currently locked or not
+    int dif = _TipID - _BaseID;
+
+    int inBase = _BaseID % _FullCount;
+
+    int newID = id;
+
+    if( inBase + dif > _FullCount ){
+      if( newID < inBase ){ newID += _FullCount; }
+    }
+
+    return float( newID - inBase ) / float(dif);//(newID >= inBase && newID < inBase + dif);
+
+
+}
+
 
 float3 getProj( float3 pos , float3 sp , float3 ep ){
   float3 dif = sp-ep;
@@ -159,7 +214,6 @@ float3 getProj( float3 pos , float3 sp , float3 ep ){
 
 
 float3 CurlForce( float3 v , float3 rO , float3 rD ){
-
 
   float3 toLine = getProj( v , rO , rO + rD );
 
@@ -200,7 +254,7 @@ void SetGlyph(uint threadID : SV_GroupIndex, uint3 u3GroupID : SV_GroupID) {
       Vert v = _VertBuffer[safe];
 
       v.debug.x = _Time;
-      v.debug.y = 1;
+      v.debug.y = 0;
 
       _VertBuffer[safe] = v;
 
@@ -244,7 +298,10 @@ void SetGlyph(uint threadID : SV_GroupIndex, uint3 u3GroupID : SV_GroupID) {
       
       
       // TODO can use these better!
-      v.extraScale = p.extraScale;
+      v.extraScale = _Scale;
+      
+      
+      
       v.whichTextureType = p.whichTextureType;
       v.hueExtra = p.hueExtra;
       v.special = p.special;
@@ -322,7 +379,7 @@ void SetPageAtEmitPos(uint threadID : SV_GroupIndex, uint3 u3GroupID : SV_GroupI
 
     // Need to make sure that its not bigger than anchor count
     // so doesn't accidently set another letter
-    if(pID <= _AnchorCount ){ v.pos = _EmitPos; }
+    if(pID <= _AnchorCount ){ v.pos = _Emitter; }
 
     _VertBuffer[sID] = v;
 
@@ -347,7 +404,6 @@ void SimulationTest(uint threadID : SV_GroupIndex, uint3 u3GroupID : SV_GroupID)
     int pID = threadID + u3GroupID.x * NR_THREADS;
     int sID =safeID(pID,_FullCount);
     Vert v = _VertBuffer[sID];
-    TransferVert tv = _TransferBuffer[safeID(pID*4,_FullCount*4)];
 
     float3 force = 0;
 
@@ -356,43 +412,64 @@ void SimulationTest(uint threadID : SV_GroupIndex, uint3 u3GroupID : SV_GroupID)
 
 
     bool inside = isInside(pID);
+    float amount = insideAmount(pID);
 
     if( inside ){
 
-      float t = _Time - v.debug.x;
+     // float t = _Time - v.debug.x;
 
-      force += -min((v.pos - v.lockPosition),1000) * .01;
 
-      //force += curlNoise( v.pos * .4 ) * .002 * min( pow((v.pos - v.lockPosition),4),3)/(t*t*.4+1);
+    // Spawing in particles base on displaySpeed
+     if(  (1-amount) + (_Time -v.debug.x) * _SpawnRate > 1 ){
+
+      v.debug.y += _LiveRate;
+      force += -min((v.pos - v.lockPosition),1000) * _LockPower;
+
+     }
+
+      force += curlNoise( v.pos * _LockedNoiseSize+ _LockedNoiseSpeed * _Time ) * _LockedNoisePower;// * min( pow((v.pos - v.lockPosition),4),3)/(t*t*.4+1);
       //force += GetRayForce( v.pos , -.004 , 5 * length( tv.offset) );
+
+      // Let them grow in!
+
+      
+
+      v.vel *= _LockedDampening;
 
     }else{
      
-      force += curlNoise( v.pos * .3 ) * .002;
-      force += float3(0,1,0) * .01;
-      //v.debug.y -= .005;
+
+      force += curlNoise( v.pos * _NoiseSize + _NoiseSpeed * _Time) * _NoisePower;
+      force += _Gravity * _GravityPower;
+
+      v.vel *= _Dampening;
+
+      v.debug.y -= _DieRate;
 
     }
 
-  if( length( force ) > 1 ){ force = normalize(force) * 1; }
-    //}
-    //}else{
-    //  force += float3(0,1,0) * .01;
-    //}
-    v.vel  += force * (hash((float)pID) * .6+ .4);
+    v.debug.y = saturate(v.debug.y);
+
+    force *= _ForceMultiplier;
+    if( length( force ) > 1 ){ force = normalize(force) * 1; }
+
+    // Adding in mass
+    v.vel  += force / ( _Mass + (hash((float)pID) * _MassRandomness+ (1-_MassRandomness)));
 
 
-  if( length( v.vel ) > 1 ){ v.vel = normalize(v.vel) * 1; }
+    if( length( v.vel ) > 1 ){ v.vel = normalize(v.vel) * 1; }
     v.pos += v.vel;
-    v.vel *= .8;
 
+    // checking for nans!
     nanCheck(v);
-    //v.pos = v.lockPosition;
     _VertBuffer[sID] = v;
+
 }
 
 
 
+
+// Easy little simulation just to make sure we've got position correct
 #define NR_THREADS 128
 [numthreads(NR_THREADS,1,1)]
 void SimulationDebug(uint threadID : SV_GroupIndex, uint3 u3GroupID : SV_GroupID) {
@@ -400,11 +477,8 @@ void SimulationDebug(uint threadID : SV_GroupIndex, uint3 u3GroupID : SV_GroupID
     int pID = threadID + u3GroupID.x * NR_THREADS;
     int sID =safeID(GetID(pID),_FullCount);
     Vert v = _VertBuffer[sID];
-
-
    
     v.pos = v.lockPosition;
-
 
     _VertBuffer[sID] = v;
 
@@ -430,33 +504,24 @@ void Transfer(uint threadID : SV_GroupIndex, uint3 u3GroupID : SV_GroupID) {
 
     bool inside = isInside( particleID );
 
-    if( !inside){
-      radiusMultiplier = max(p.debug.y,0); //1/((_Time - p.debug.x) + 1);
-    }
 
-    //radiusMultiplier = 1;
 
+    // Getting size using life
+    radiusMultiplier = max(p.debug.y,0);
 
     int idInParticle = pID % 4;
     int row = idInParticle / 2;
     int col = pID % 2;
 
     float3 u = _CameraUp ;
-    float3 l = _CameraRight;//normalize(cross(float3(0,0,1),u));
+    float3 l = _CameraRight;
 
-    //l = l* (float(col)-.5);
-    //u = u* (float(row)-.5);
-
-    //u = float3(0,1,0);
-    //l = float3(1,0,0);
-
-    float3 fPos = p.pos + ((u*v.offset.y) + (l*v.offset.x)) * radiusMultiplier * 1*_Radius*_Scale;
-    //float3 fPos = p.pos + ((l) + (u))*_Radius*_Scale;
+    // Offseting out to make the full quad
+    float3 fPos = p.pos + ((u*v.offset.y) + (l*v.offset.x)) * radiusMultiplier * 1*_Radius*v.extraScale;
 
     v.pos = fPos;
     v.vel = p.vel;
-    //v.uv = v.uv;
-    //v.nor = p.nor;
+    v.nor = -normalize(cross(_CameraUp,-_CameraRight));
 
     _TransferBuffer[sID] = v;
 

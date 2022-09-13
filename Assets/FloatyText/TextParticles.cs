@@ -5,6 +5,8 @@ using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEditor;
 
+
+
 [ExecuteAlways]
 public class TextParticles : MonoBehaviour{
 
@@ -16,7 +18,45 @@ public class TextParticles : MonoBehaviour{
   public TextAnchor anchor;
 
 
-  public Vector3 emitterPosition;
+
+[Header("SIMULATION")]  
+
+  public float _ForceMultiplier;
+  public Transform _Emitter;
+  public float _EmitterSpread;
+
+  public Vector3 _Gravity;
+  public float _GravityPower;
+
+  public Transform _Repeller;
+  public float _RepellerPower;
+  public float _RepellerRadius;
+
+  public float _NoiseSize;
+  public float _NoisePower;
+
+  public Vector3 _NoiseSpeed;
+  
+
+  public float _LockPower;
+  public float _MassRandomness;
+  public float _Mass;
+
+  public float _DieRate;
+  public float _LiveRate;
+
+  public float _LockedNoisePower;
+  public float _LockedNoiseSize;
+  public Vector3 _LockedNoiseSpeed;
+
+  public float _LockedDampening;
+  public float _Dampening;
+
+  public float _SpawnRate;
+
+
+
+
 
 
   public ComputeShader shader;
@@ -89,7 +129,11 @@ private uint transferThreadSize;
 
         MakeBuffers();
         GetKernels();
-        Set(anchor);
+
+        if(anchor != null ){
+        
+          Set(anchor);
+        }
   }
 
   void OnDisable(){
@@ -111,7 +155,8 @@ private uint transferThreadSize;
     }
 
   void Update(){
- 
+    
+    //HardSet( anchor);
     SetValues();
     Simulate();
     Transfer();
@@ -135,6 +180,10 @@ private uint transferThreadSize;
   //Sets the anchors  aka target locations for each letter
   void SetAnchor(){
     DispatchShader(currentMax-currentMin, setAnchorKernel, setAnchorThreadSize );
+  }
+
+    void SetPage(){
+    DispatchShader(currentMax-currentMin,setPageKernel, setPageThreadSize );
   }
 
 
@@ -180,19 +229,51 @@ private uint transferThreadSize;
     scale = t.scale;
 
     SetValues();
-
+  
     SetAnchor();
     SetGlyphs();
+    //Emit();
+    SetPage();
+
+  }
+
+
+  
+  public void HardSet(TextAnchor t){
+  
+    //currentMin = currentMax;
+    //currentMax = currentMin + t.count; 
+    
+    anchor = t;
+    scale = t.scale;
+
+    SetValues();
+  
+    SetAnchor();
+    SetGlyphs();
+    SetPage();
 
   }
 
 
 
+
+
+  // This function releases all the particles
   public void Release(){
     currentMin = currentMax;
   }
 
+  
+  
+  /*
 
+
+    This sections generates our compute buffers
+    for simulation as well as for renderering
+
+
+  */
   public void MakeBuffers(){
     
     ReleaseBuffers();
@@ -210,18 +291,30 @@ private uint transferThreadSize;
     for( int i = 0; i < maxParticleCount; i++ ){
         int bID = i * 4;
         values[ index ++ ] = bID + 0;
+        values[ index ++ ] = bID + 3;
         values[ index ++ ] = bID + 1;
-        values[ index ++ ] = bID + 3;
         values[ index ++ ] = bID + 0;
-        values[ index ++ ] = bID + 3;
         values[ index ++ ] = bID + 2;
+        values[ index ++ ] = bID + 3;
     }
     _tris.SetData(values);
   
 
   }
 
+    /*
+
+
+  This sections gets the different values for the kernels
+  in the compute shader and makes sure that we've set the
+  correct size for them
+
+
+  */
+
+
   public void GetKernels(){
+
     setGlyphKernel = shader.FindKernel( "SetGlyph" );
     setAnchorKernel = shader.FindKernel( "SetAnchor" );
     setPageKernel = shader.FindKernel( "SetPageAtEmitPos" );
@@ -235,6 +328,15 @@ private uint transferThreadSize;
     simulateThreadSize = numThreads( simulateKernel );
     transferThreadSize = numThreads( transferKernel );
   }
+
+
+  /*
+
+
+  This sections sets all the values in our shaders!
+
+
+  */
 
 
   public void SetValues(){
@@ -293,12 +395,55 @@ private uint transferThreadSize;
     shader.SetFloat("_Delta", Time.deltaTime);
     shader.SetFloat("_DT", Time.deltaTime);
 
+
+
+    shader.SetFloat("_ForceMultiplier",_ForceMultiplier);
+
+    shader.SetVector( "_Emitter" , _Emitter.position);
+    shader.SetFloat( "_EmitterSpread" , _EmitterSpread);
+
+    shader.SetVector( "_Gravity" , _Gravity);
+    shader.SetFloat( "_GravityPower" , _GravityPower);
+
+    shader.SetVector( "_Repeller"      , _Repeller.position  );
+    shader.SetFloat(  "_RepellerPower"  , _RepellerPower      );
+    shader.SetFloat(  "_RepellerRadius" , _RepellerRadius     );
+
+    shader.SetFloat( "_NoiseSize"   , _NoiseSize);
+    shader.SetFloat( "_NoisePower"  , _NoisePower);
+    shader.SetVector( "_NoiseSpeed" , _NoiseSpeed);
+    
+
+    shader.SetFloat( "_LockPower" , _LockPower);
+    shader.SetFloat( "_MassRandomness" , _MassRandomness);
+    shader.SetFloat( "_Mass" , _Mass);
+
+    shader.SetFloat( "_DieRate" , _DieRate);
+    shader.SetFloat( "_LiveRate" , _LiveRate);
+
+    shader.SetFloat( "_LockedNoisePower" , _LockedNoisePower);
+    shader.SetFloat( "_LockedNoiseSize" , _LockedNoiseSize);
+    shader.SetVector( "_LockedNoiseSpeed" , _LockedNoiseSpeed);
+    shader.SetFloat( "_LockedDampening" , _LockedDampening);
+    shader.SetFloat( "_Dampening" , _Dampening);
+    shader.SetFloat( "_SpawnRate" , _SpawnRate);
+
+
+
+
+
     }else{
-      print("we got a null");
+      //print("we got a null");
     }
 
 
   }
+
+
+  /*
+
+
+  */
 
   private MaterialPropertyBlock mpb;
   
@@ -315,6 +460,11 @@ private uint transferThreadSize;
   }
 
 
+
+/*
+
+
+*/
 
 
   public Material debugMaterial;
